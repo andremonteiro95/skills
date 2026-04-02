@@ -30,6 +30,10 @@ You MUST respond with ONLY a JSON object matching this exact structure. No prose
 }
 ```
 
+## Line Number Semantics
+
+The `line` field must be the **line number within the diff hunk**, not the absolute file line number. GitHub's review comment API positions comments relative to the diff. If you use absolute line numbers, comments will appear on the wrong line or fail silently. Only reference lines that appear in the diff — never guess at lines outside it.
+
 ## Verdict Rules
 
 - If ANY finding is Critical → verdict MUST be "request-changes"

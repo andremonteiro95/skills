@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Use when reviewing pull requests — single PR by number/URL, or no args to check your full review inbox. Triggers on "review PR 123", "review my PRs", "check my PR inbox", "what PRs need my review"
+description: Use when reviewing pull requests, checking PR review inbox, or asked to review code changes on GitHub. Triggers on "review PR 123", "review my PRs", "check my PR inbox", "what PRs need my review"
 ---
 
 # Review PR
@@ -267,6 +267,12 @@ Where:
 - `{COMMENTS_JSON}` is the array of accepted findings: `[{"path": "{FILE}", "line": {LINE}, "body": "{COMMENT}"}]`
 
 After submission: "Review submitted for PR #{NUMBER} ✅"
+
+## Common Mistakes
+
+- **Misplaced review comments:** The GitHub review API expects `line` relative to the diff hunk, not absolute file line numbers. See `output-contract.md` for details.
+- **Reviewing draft PRs without confirming:** Draft PRs are shown in inbox mode — the user may not want to review them yet. The `[DRAFT]` marker helps, but consider prompting before reviewing drafts.
+- **Delta diff fails on rebased branches:** Incremental review uses commit timestamps to find new commits. If the author rebased or squashed, the parent SHA logic in Step 3 may produce an empty or incorrect diff. Fall back to full review if the delta diff is empty.
 
 ## Step 9: Session Summary (Inbox Mode Only)
 

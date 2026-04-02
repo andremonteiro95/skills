@@ -1,0 +1,20 @@
+{
+  "name": "andremonteiro95-skills",
+  "description": "AI-powered PR review skills for Claude Code",
+  "owner": {
+    "name": "Andre Monteiro",
+    "url": "https://github.com/andremonteiro95"
+  },
+  "plugins": [
+    {
+      "name": "pr-reviews",
+      "description": "AI-powered PR review — discover your review queue, analyze diffs with severity-rated findings, and submit GitHub reviews interactively",
+      "version": "1.0.0",
+      "source": "./",
+      "author": {
+        "name": "Andre Monteiro",
+        "url": "https://github.com/andremonteiro95"
+      }
+    }
+  ]
+}

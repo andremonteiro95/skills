@@ -22,8 +22,11 @@ Reviews a single PR by number or URL. Same interactive walkthrough, just for one
 
 ## Installation
 
-```bash
-claude plugins add andremonteiro95/skills
+In Claude Code:
+
+```
+/plugin marketplace add andremonteiro95/skills
+/plugin install pr-reviews@andremonteiro95-skills
 ```
 
 ## Requirements

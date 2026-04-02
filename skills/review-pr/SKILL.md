@@ -1,38 +1,62 @@
 ---
 name: review-pr
-description: Use when reviewing a single pull request by number or URL, or when the user says "review PR 123" or "review this PR"
+description: Use when reviewing pull requests — single PR by number/URL, or no args to check your full review inbox. Triggers on "review PR 123", "review my PRs", "check my PR inbox", "what PRs need my review"
 ---
 
 # Review PR
 
-Review a single GitHub PR with AI-powered analysis. Presents a severity-rated summary, walks you through findings one by one, and submits a batched GitHub review with your accepted comments.
+Review GitHub PRs with AI-powered analysis. Supports single PR review by number/URL, or inbox mode to discover and review all PRs awaiting your review.
 
 ## Arguments
 
-This skill accepts a PR number or GitHub PR URL as an argument:
-- `/review-pr 142`
-- `/review-pr https://github.com/org/repo/pull/142`
+- `/review-pr 142` — review PR #142
+- `/review-pr https://github.com/org/repo/pull/142` — review by URL
+- `/review-pr` — inbox mode: discover all PRs awaiting your review
 
-If no argument is provided, ask: "Which PR? (number or URL)"
+## Step 1: Parse Input & Determine Mode
 
-## Step 1: Parse Input and Determine Repo
+**Single PR mode** (argument provided):
+Extract the PR number. If a URL, parse the number from it.
 
-Extract the PR number from the argument. If a URL is provided, parse the number from it.
-
-Get the repo context:
+**Inbox mode** (no argument):
 ```bash
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+gh search prs --review-requested=@me --repo=$REPO --state=open \
+  --json number,title,author,url
 ```
+
+If no PRs found: "No PRs awaiting your review in {REPO}." and stop.
+
+For each discovered PR, fetch enrichment data:
+```bash
+gh pr checks {NUMBER}
+gh pr view {NUMBER} --json additions,deletions,isDraft
+```
+
+Show summary table:
+```
+Found {COUNT} PRs awaiting your review in {REPO}:
+
+ #  | PR                                | Author    | Checks     | +/-
+----|-----------------------------------|-----------|------------|--------
+ 1  | #{NUM} {TITLE}                    | {AUTHOR}  | {STATUS}   | +{A} -{D}
+```
+
+Checks emoji: ✅ pass, ❌ fail, ⏳ pending, ➖ none. Mark draft PRs with `[DRAFT]`.
+
+Ask: "Review all, or pick specific numbers? (all / 1,3,5 / none)"
+
+If **none**, stop.
+
+For each selected PR, run Steps 2–8. Dispatch reviewer subagents in **parallel** (Step 5), but walk through results sequentially (Steps 6–7).
 
 ## Step 2: Fetch PR Context
 
-Run these commands to gather all context for the reviewer:
-
 ```bash
-# PR metadata
+# Metadata
 gh pr view {NUMBER} --json title,author,body,additions,deletions,isDraft,baseRefName,headRefName,url
 
-# CI check status
+# CI status
 gh pr checks {NUMBER}
 
 # Full diff
@@ -41,33 +65,124 @@ gh pr diff {NUMBER}
 
 ### Edge Cases
 
-Before proceeding, check:
+- **PR not found:** If `gh pr view` fails → "PR #{NUMBER} not found in {REPO}." and stop.
+- **Own PR (inbox mode):** Skip silently — exclude from the summary table.
+- **Own PR (single PR mode):** "This is your own PR." and stop.
 
-- **PR not found:** If `gh pr view` fails, say "PR #{NUMBER} not found in {REPO}" and stop.
-- **Own PR:** If the PR author matches `gh api user --jq '.login'`, warn: "This is your own PR — review anyway? (y/n)". Stop if they say no.
-- **Already reviewed:** Run `gh pr view {NUMBER} --json reviews --jq '.reviews[] | select(.author.login == "{YOUR_LOGIN}")'`. If you find an existing review, show its status and ask: "You've already reviewed this PR ({STATUS}). Re-review? (y/n)". Stop if they say no.
+## Step 3: Check for Prior Review
 
-## Step 3: Dispatch Reviewer Subagent
+```bash
+YOUR_LOGIN=$(gh api user --jq '.login')
+gh api repos/{OWNER}/{REPO}/pulls/{NUMBER}/reviews \
+  --jq "[.[] | select(.user.login == \"$YOUR_LOGIN\")] | last"
+```
 
-Read the template at `review-pr/reviewer-prompt.md` and fill in the placeholders:
+If no prior review exists, continue to Step 4.
 
-| Placeholder | Source |
-|-------------|--------|
-| `{PR_NUMBER}` | From argument |
-| `{PR_TITLE}` | From `gh pr view --json title` |
-| `{PR_AUTHOR}` | From `gh pr view --json author` |
-| `{BASE_BRANCH}` | From `gh pr view --json baseRefName` |
-| `{HEAD_BRANCH}` | From `gh pr view --json headRefName` |
-| `{CI_STATUS}` | Summary from `gh pr checks`: "Pass", "Fail", or "Pending" |
-| `{CI_DETAILS}` | If failing, list which checks failed |
-| `{PR_BODY}` | From `gh pr view --json body` |
-| `{PR_DIFF}` | From `gh pr diff` |
+If a prior review exists, extract `submitted_at` and `state`, then count new commits:
+```bash
+gh api repos/{OWNER}/{REPO}/pulls/{NUMBER}/commits \
+  --jq "[.[] | select(.commit.committer.date > \"{SUBMITTED_AT}\")] | length"
+```
 
-Dispatch using the Agent tool. The subagent returns a JSON object with verdict, summary, strengths, and findings.
+Prompt:
+```
+You reviewed this PR on {DATE} ({VERDICT}).
+{N} new commits since then.
 
-## Step 4: Present Summary
+(F)ull re-review / (I)ncremental (new commits only) / (S)kip?
+```
 
-Show the PR summary to the user:
+If **Skip**, move to next PR (inbox) or stop (single).
+
+If **Incremental**, fetch the delta diff instead of the full diff:
+```bash
+# Get SHA of first new commit's parent
+FIRST_NEW_SHA=$(gh api repos/{OWNER}/{REPO}/pulls/{NUMBER}/commits \
+  --jq "[.[] | select(.commit.committer.date > \"{SUBMITTED_AT}\")] | first | .sha")
+PARENT_SHA=$(gh api repos/{OWNER}/{REPO}/commits/$FIRST_NEW_SHA \
+  --jq '.parents[0].sha')
+
+# Get HEAD SHA
+HEAD_SHA=$(gh pr view {NUMBER} --json headRefOid --jq '.headRefOid')
+
+# Delta diff
+gh api repos/{OWNER}/{REPO}/compare/$PARENT_SHA...$HEAD_SHA \
+  --jq '.files[] | {filename, patch}'
+```
+
+Use this delta diff in place of the full diff for Steps 4–5.
+
+## Step 4: Diff Management
+
+### Filter Generated Files
+
+Before sending the diff to the reviewer, strip files matching:
+```
+*.lock, *.min.js, *.min.css, *.snap, *.generated.*,
+package-lock.json, yarn.lock, pnpm-lock.yaml,
+*.pb.go, *_generated.go, *.g.dart
+```
+
+Note skipped files: "Skipped {N} generated/lock files ({list})."
+
+### Size Check
+
+Count lines in the filtered diff.
+
+| Diff size | Strategy |
+|-----------|----------|
+| < 2,000 lines | Send full diff to one subagent |
+| 2,000–8,000 lines | Ask: "Large PR ({N} lines, {M} files). Review all at once or split by directory? (a/s)" |
+| > 8,000 lines | "PR too large for single pass ({N} lines). Splitting by directory." |
+
+### Chunked Review
+
+When splitting by directory:
+1. Group changed files by their top-level directory
+2. Dispatch one subagent per directory group (each gets PR description + its chunk)
+3. Merge findings from all subagents, deduplicate by file:line (keep higher severity)
+4. Present merged findings in the normal walkthrough
+
+## Step 5: Dispatch Reviewer Subagent(s)
+
+Read the contents of `review-lens.md` and `output-contract.md` from this skill's directory.
+
+Assemble the reviewer prompt by concatenating:
+
+1. Contents of `review-lens.md` (verbatim)
+2. Contents of `output-contract.md` (verbatim)
+3. PR context block:
+
+```
+## PR Context
+
+**PR:** #{PR_NUMBER} — {PR_TITLE}
+**Author:** {PR_AUTHOR}
+**Base:** {BASE_BRANCH} ← {HEAD_BRANCH}
+**CI Status:** {CI_STATUS}
+{CI_DETAILS}
+
+## PR Description
+
+{PR_BODY}
+
+## Diff
+
+{PR_DIFF}
+```
+
+4. If incremental mode, append:
+
+```
+## Incremental Review Note
+
+This is an incremental review. The reviewer previously submitted {VERDICT} on {DATE}. Focus on whether new changes address prior feedback and whether they introduce new issues.
+```
+
+Dispatch using the Agent tool. The subagent returns a JSON object.
+
+## Step 6: Present Summary
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -79,7 +194,9 @@ Verdict: {VERDICT_EMOJI} {VERDICT}
 
 Summary: {SUMMARY}
 
-  {CRITICAL_EMOJI} {CRITICAL_COUNT} Critical    {IMPORTANT_EMOJI} {IMPORTANT_COUNT} Important    {MINOR_EMOJI} {MINOR_COUNT} Minor
+Description: {ALIGNMENT_EMOJI} {ALIGNMENT_STATUS} {ALIGNMENT_NOTES}
+
+  🔴 {CRITICAL_COUNT} Critical    🟡 {IMPORTANT_COUNT} Important    ⚪ {MINOR_COUNT} Minor
 
 Strengths:
   {STRENGTHS_LIST}
@@ -88,16 +205,18 @@ Walk through findings? (y/n/skip)
 ```
 
 Emoji mapping:
-- Checks: ✅ Pass, ❌ Fail, ⏳ Pending
+- Checks: ✅ Pass, ❌ Fail, ⏳ Pending, ➖ None
 - Verdict: 🟢 Approve, 🟡 Request Changes, 🔵 Comment
-- Severity counts: 🔴 Critical, 🟡 Important, ⚪ Minor
+- Severity: 🔴 Critical, 🟡 Important, ⚪ Minor
+- Alignment: ✅ aligned, ⚠️ drift, ➖ missing
 
-If the user says **n** or **skip**, go to Step 6 (submit with no comments, or skip entirely).
-If the user says **y**, proceed to Step 5.
+If **skip**, go to Step 8 with no comments.
+If **n**, go to Step 8 with no comments.
+If **y**, proceed to Step 7.
 
-## Step 5: Finding-by-Finding Walkthrough
+## Step 7: Finding-by-Finding Walkthrough
 
-Present findings one at a time, ordered by severity (Critical first, then Important, then Minor):
+Present findings one at a time, ordered by severity (Critical → Important → Minor):
 
 ```
 [{INDEX}/{TOTAL}] {SEVERITY_EMOJI} {SEVERITY} — {TITLE}
@@ -112,16 +231,11 @@ Suggestion: {SUGGESTION}
 Accept / Reject / Edit comment? (a/r/e)
 ```
 
-For each finding:
-- **Accept (a):** Queue the finding for the review. The comment body is: the explanation + suggestion.
-- **Reject (r):** Drop the finding. Move to next.
-- **Edit (e):** Ask the user to provide their revised comment text. Queue the edited version.
+- **Accept (a):** Queue the finding. Comment body = explanation + suggestion.
+- **Reject (r):** Drop the finding.
+- **Edit (e):** Ask user for revised comment text. Queue the edited version.
 
-Track accepted findings in a list for submission.
-
-## Step 6: Submit Review
-
-After the walkthrough (or if the user skipped it), show the review summary:
+## Step 8: Submit Review
 
 ```
 Review summary for PR #{NUMBER}:
@@ -132,14 +246,13 @@ Recommended verdict: {RECOMMENDED_VERDICT}
 Submit as: (A)pprove / (R)equest Changes / (C)omment only / (S)kip?
 ```
 
-The recommended verdict comes from the subagent's verdict, adjusted:
-- If the user rejected all Critical findings, downgrade from "request-changes" to "comment"
-- If the user accepted any Critical finding, keep "request-changes"
+Verdict adjustment:
+- If user rejected all Critical findings → downgrade from "request-changes" to "comment"
+- If user accepted any Critical finding → keep "request-changes"
 
-If the user chooses **(S)kip**, do not submit. Move on.
+If **(S)kip**, do not submit.
 
-Otherwise, submit using the GitHub API:
-
+Otherwise submit:
 ```bash
 gh api repos/{OWNER}/{REPO}/pulls/{NUMBER}/reviews \
   --method POST \
@@ -150,7 +263,23 @@ gh api repos/{OWNER}/{REPO}/pulls/{NUMBER}/reviews \
 
 Where:
 - `{EVENT}` is `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`
-- `{REVIEW_BODY}` is the subagent's summary
-- `{COMMENTS_JSON}` is the array of accepted findings mapped to `{"path": "{FILE}", "line": {LINE}, "body": "{COMMENT}"}`
+- `{REVIEW_BODY}` is the subagent's summary (plus "Incremental review (commits since {DATE})." if applicable)
+- `{COMMENTS_JSON}` is the array of accepted findings: `[{"path": "{FILE}", "line": {LINE}, "body": "{COMMENT}"}]`
 
-After submission, confirm: "Review submitted for PR #{NUMBER} ✅"
+After submission: "Review submitted for PR #{NUMBER} ✅"
+
+## Step 9: Session Summary (Inbox Mode Only)
+
+After all selected PRs are processed:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Review session complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ PR                              | Verdict
+---------------------------------|------------------
+ #142 Fix auth redirect loop     | ✅ Approved
+ #139 Add billing webhook handler| 🟡 Request Changes
+ #145 Update README typos        | ⏭️  Skipped
+```

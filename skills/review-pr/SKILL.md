@@ -210,6 +210,8 @@ Emoji mapping:
 - Severity: 🔴 Critical, 🟡 Important, ⚪ Minor
 - Alignment: ✅ aligned, ⚠️ drift, ➖ missing
 
+**If findings array is empty (0 Critical, 0 Important, 0 Minor):** Skip the "Walk through findings?" prompt entirely. Go directly to Step 8.
+
 If **skip**, go to Step 8 with no comments.
 If **n**, go to Step 8 with no comments.
 If **y**, proceed to Step 7.
@@ -231,7 +233,15 @@ Suggestion: {SUGGESTION}
 Accept / Reject / Edit comment? (a/r/e)
 ```
 
-- **Accept (a):** Queue the finding. Comment body = explanation + suggestion.
+- **Accept (a):** Queue the finding. Format the comment body as:
+  - Start with the explanation
+  - If the finding has `suggestion_code`, append a GitHub suggestion block:
+    ````
+    ```suggestion
+    {suggestion_code}
+    ```
+    ````
+  - If no `suggestion_code`, append the prose suggestion as-is
 - **Reject (r):** Drop the finding.
 - **Edit (e):** Ask user for revised comment text. Queue the edited version.
 

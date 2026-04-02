@@ -31,9 +31,10 @@ Discover PRs ─► Fetch diff ─► Filter noise ─► Dispatch reviewer ─�
 2. **Diff management** — strips generated files and lockfiles; large PRs (2k+ lines) are chunked by directory so the reviewer stays within context limits
 3. **Analysis** — a reviewer subagent analyzes the diff and returns structured findings rated Critical / Important / Minor
 4. **Description alignment** — flags when the diff doesn't match what the PR description claims, or vice versa
-5. **Walkthrough** — presents each finding with the relevant diff hunk; you accept, reject, or edit each comment before anything is submitted
-6. **Incremental re-review** — detects prior reviews and offers to review only new commits instead of the full diff
-7. **Submission** — batches accepted comments into a single GitHub review with your chosen verdict
+5. **Walkthrough** — presents each finding with the relevant diff hunk; you accept, reject, or edit each comment before anything is submitted. Clean PRs (0 findings) skip straight to submission.
+6. **GitHub suggestion blocks** — when the reviewer can provide exact replacement code, accepted comments include [`suggestion` blocks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/incorporating-feedback-in-your-pull-request) that authors can apply with one click
+7. **Incremental re-review** — detects prior reviews and offers to review only new commits instead of the full diff
+8. **Submission** — batches accepted comments into a single GitHub review with your chosen verdict
 
 ## What's Inside
 

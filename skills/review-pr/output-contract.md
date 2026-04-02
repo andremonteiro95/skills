@@ -24,11 +24,16 @@ You MUST respond with ONLY a JSON object matching this exact structure. No prose
       "title": "Short descriptive title",
       "explanation": "Why this matters — what could go wrong",
       "suggestion": "Concrete fix or approach to resolve this",
+      "suggestion_code": "const sorted = arr.toSorted(compareFn);",
       "diff_hunk": "The relevant lines from the diff for context"
     }
   ]
 }
 ```
+
+## Suggestion Code
+
+The `suggestion_code` field is **optional**. Include it when you can provide exact replacement code for the lines in `line_range`. Omit it when the suggestion is architectural, spans multiple files, or can't be expressed as a direct line replacement. When present, `suggestion_code` must contain the complete replacement for the lines covered by `line_range` — it will be rendered as a GitHub suggestion block that the author can apply with one click.
 
 ## Line Number Semantics
 

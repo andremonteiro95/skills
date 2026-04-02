@@ -1,45 +1,52 @@
-# PR Review Skills
+# PR Reviews
 
-A Claude Code skill for AI-powered GitHub PR review. A subagent analyzes each PR's diff, presents severity-rated findings, and walks you through them interactively before submitting a batched GitHub review.
+AI-powered code review for GitHub pull requests, built as a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill.
 
-## Skills
-
-### `/review-pr` — PR Review (single PR + inbox mode)
-
-- **`/review-pr <number|url>`** — Reviews a specific PR by number or URL.
-- **`/review-pr`** (no args) — Inbox mode: discovers all open PRs where you're a requested reviewer (directly or via team), shows a summary table with CI status, and lets you review them one by one.
-
-## How It Works
-
-1. **Discovery** — finds PRs using `gh search prs --review-requested=@me` (handles both direct and team-based requests)
-2. **Diff management** — filters out generated files and lock files before analysis; large PRs are reviewed in chunks to stay within context limits
-3. **Analysis** — dispatches a reviewer subagent per PR that analyzes the diff and returns structured findings rated as Critical / Important / Minor
-4. **Description alignment** — checks whether the implementation matches what the PR description says it does, flagging any gaps or scope drift
-5. **Summary** — presents a verdict with severity counts and strengths
-6. **Walkthrough** — shows each finding with the relevant diff hunk; you accept, reject, or edit each comment
-7. **Incremental re-review** — if a prior review is detected, offers to review only the commits added since then instead of the full diff
-8. **Submission** — batches accepted comments into a single GitHub review with your chosen verdict (approve / request changes / comment)
+Point it at a PR and it dispatches a reviewer subagent that analyzes the diff, rates findings by severity, and walks you through each one before submitting a batched GitHub review — all without leaving your terminal.
 
 ## Installation
-
-In Claude Code:
 
 ```
 /plugin marketplace add andremonteiro95/skills
 /plugin install pr-reviews@andremonteiro95-skills
 ```
 
-## Requirements
+Requires [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with access to the target repo.
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with access to the target repo
+## Usage
 
-## File Structure
+- **`/review-pr 142`** — review a single PR by number
+- **`/review-pr https://github.com/org/repo/pull/142`** — review by URL
+- **`/review-pr`** — inbox mode: discover all PRs awaiting your review, pick which to review
+
+## How It Works
+
+```
+Discover PRs ─► Fetch diff ─► Filter noise ─► Dispatch reviewer ─► Present summary
+                                                                         │
+                                          Submit to GitHub ◄─ Walkthrough ┘
+```
+
+1. **Discovery** — finds PRs using `gh search prs --review-requested=@me` (handles both direct and team-based requests)
+2. **Diff management** — strips generated files and lockfiles; large PRs (2k+ lines) are chunked by directory so the reviewer stays within context limits
+3. **Analysis** — a reviewer subagent analyzes the diff and returns structured findings rated Critical / Important / Minor
+4. **Description alignment** — flags when the diff doesn't match what the PR description claims, or vice versa
+5. **Walkthrough** — presents each finding with the relevant diff hunk; you accept, reject, or edit each comment before anything is submitted
+6. **Incremental re-review** — detects prior reviews and offers to review only new commits instead of the full diff
+7. **Submission** — batches accepted comments into a single GitHub review with your chosen verdict
+
+## What's Inside
 
 ```
 skills/
   review-pr/
-    SKILL.md              # Unified skill (single PR + inbox mode)
-    review-lens.md        # Reviewer persona, focus areas, severity definitions
-    output-contract.md    # JSON schema, verdict rules
+    SKILL.md            # The skill — handles single PR and inbox mode
+    review-lens.md      # What the reviewer looks for (persona, severity, focus areas)
+    output-contract.md  # JSON schema the reviewer must return
 ```
+
+The reviewer prompt is assembled from two independent files: a **review lens** (what to look for) and an **output contract** (how to format findings). This separation means you can tune what the reviewer focuses on without touching the output format, and vice versa.
+
+## License
+
+MIT

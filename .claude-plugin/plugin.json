@@ -1,6 +1,6 @@
 {
-  "name": "pr-reviews",
-  "description": "AI-powered PR review — discover your review queue, analyze diffs with severity-rated findings, and submit GitHub reviews interactively",
+  "name": "dev-skills",
+  "description": "Developer workflow skills — PR reviews with severity-rated findings and CLAUDE.md authoring with progressive disclosure",
   "version": "1.0.0",
   "author": {
     "name": "Andre Monteiro",

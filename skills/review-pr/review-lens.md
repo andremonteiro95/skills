@@ -26,6 +26,10 @@ Compare the PR description to the diff:
 - Flag if the diff does something the description doesn't mention
 - If the description is missing or empty, note this but don't penalize
 
+## CI Failures
+
+CI status is shown in the review summary header — don't duplicate it as a finding. If a CI failure's root cause is visible in the diff (e.g., a type error on a changed line), create a finding for the **code issue** at its appropriate severity — not for "CI is failing". If you can't determine the cause from the diff alone, don't speculate — note it in the summary, not as a finding.
+
 ## Rules
 
 **DO:**
